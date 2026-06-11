@@ -49,13 +49,29 @@ class OtelMetricsMixin:
 
         protocol = _get_otlp_metrics_protocol()
         if protocol == "grpc":
-            from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
-                OTLPMetricExporter,
-            )
+            try:
+                from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
+                    OTLPMetricExporter,
+                )
+            except ImportError:
+                _logger.warning(
+                    "gRPC OTLP metric exporter is not available. Please install the required "
+                    "dependency by running `pip install opentelemetry-exporter-otlp-proto-grpc`. "
+                    "Metrics export will be skipped."
+                )
+                return
         elif protocol == "http/protobuf":
-            from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
-                OTLPMetricExporter,
-            )
+            try:
+                from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
+                    OTLPMetricExporter,
+                )
+            except ImportError:
+                _logger.warning(
+                    "HTTP OTLP metric exporter is not available. Please install the required "
+                    "dependency by running `pip install opentelemetry-exporter-otlp-proto-http`. "
+                    "Metrics export will be skipped."
+                )
+                return
         else:
             _logger.warning(
                 f"Unsupported OTLP metrics protocol '{protocol}'. "
