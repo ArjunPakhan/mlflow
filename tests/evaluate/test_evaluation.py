@@ -221,7 +221,7 @@ def get_pipeline_model_uri():
                 (num_imputer, ["f3", "f4"]),
             ),
         ),
-        ("clf", sklearn.linear_model.LogisticRegression()),
+        ("clf", sklearn.linear_model.LogisticRegression(max_iter=10000, random_state=42)),
     ])
     pipeline.fit(X, y)
 
@@ -284,7 +284,7 @@ def binary_logistic_regressor_model_uri():
 
 def get_binary_logistic_regressor_model_uri():
     X, y = get_breast_cancer_dataset()
-    clf = sklearn.linear_model.LogisticRegression()
+    clf = sklearn.linear_model.LogisticRegression(max_iter=10000, random_state=42)
     clf.fit(X, y)
 
     with mlflow.start_run():
@@ -1336,7 +1336,7 @@ def test_evaluate_stdin_scoring_server():
     X, y = sklearn.datasets.load_iris(return_X_y=True)
     X = X[::5]
     y = y[::5]
-    model = sklearn.linear_model.LogisticRegression()
+    model = sklearn.linear_model.LogisticRegression(max_iter=10000, random_state=42)
     model.fit(X, y)
 
     with mlflow.start_run():
@@ -2157,7 +2157,7 @@ def test_metrics_logged_to_model_on_evaluation(
 def test_evaluate_with_model_id(iris_dataset):
     # Create and log a model
     with mlflow.start_run():
-        model = sklearn.linear_model.LogisticRegression()
+        model = sklearn.linear_model.LogisticRegression(max_iter=10000, random_state=42)
         model.fit(iris_dataset._constructor_args["data"], iris_dataset._constructor_args["targets"])
         model_info = mlflow.sklearn.log_model(model, name="model")
         model_id = model_info.model_id
@@ -2201,7 +2201,7 @@ def test_evaluate_model_id_consistency_check(multiclass_logistic_regressor_model
     """
     # Create a model with a known model ID
     with mlflow.start_run():
-        model = sklearn.linear_model.LogisticRegression()
+        model = sklearn.linear_model.LogisticRegression(max_iter=10000, random_state=42)
         model.fit(iris_dataset._constructor_args["data"], iris_dataset._constructor_args["targets"])
         model_info = mlflow.sklearn.log_model(
             model,
@@ -2250,7 +2250,7 @@ def test_evaluate_log_metrics_to_active_model(iris_dataset):
     mlflow.set_active_model(name="my-model")
     active_model_id = mlflow.get_active_model_id()
 
-    model = sklearn.linear_model.LogisticRegression()
+    model = sklearn.linear_model.LogisticRegression(max_iter=10000, random_state=42)
     model.fit(iris_dataset._constructor_args["data"], iris_dataset._constructor_args["targets"])
     eval_df = pd.DataFrame({
         "inputs": iris_dataset._constructor_args["data"].tolist(),
@@ -2413,3 +2413,46 @@ def test_delete_run_deletes_assessments_with_source_run_id():
     remaining_ids = {a.assessment_id for a in trace.info.assessments}
     assert linked_feedback.assessment_id not in remaining_ids
     assert unlinked_feedback.assessment_id in remaining_ids
+
+def test_classifier_evaluation_with_non_default_pos_label():
+    import numpy as np
+    import pandas as pd
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.metrics import average_precision_score
+
+    # 1. Create data where '0' is highly separable (our target positive class)
+    rng = np.random.RandomState(42)
+    X = rng.randn(100, 2)
+    y = (X[:, 0] > 0).astype(int)  # classes are {0, 1}
+    
+    # Train model
+    model = LogisticRegression(max_iter=10000, random_state=42).fit(X, y)
+    P = model.predict_proba(X)
+    
+    # Calculate the ground truth average precision score for class 0
+    expected_pr_auc = average_precision_score(y == 0, P[:, 0])
+    
+    # Format data for mlflow.evaluate
+    df = pd.DataFrame(X, columns=["f1", "f2"])
+    df["target"] = y
+    
+    # 2. Log the model locally
+    with mlflow.start_run():
+        model_info = mlflow.sklearn.log_model(model, "model")
+        
+    # 3. Run evaluation with the non-default pos_label=0
+    with mlflow.start_run():
+        res = mlflow.evaluate(
+            model_info.model_uri,
+            df,
+            targets="target",
+            model_type="classifier",
+            evaluator_config={"pos_label": 0, "label_list": [0, 1]}
+        )
+        
+    # 4. Assert that precision_recall_auc matches the ground truth exactly
+    np.testing.assert_almost_equal(
+        res.metrics["precision_recall_auc"], 
+        expected_pr_auc, 
+        decimal=4
+    )
